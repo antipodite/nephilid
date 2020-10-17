@@ -1,0 +1,17 @@
+* Nephilid  - A minimal CL server-side rendered web framework
+
+** Usage
+
+** Installation
+
+** Author
+
++ Isaac Stead (isaac.stead@protonmail.com)
+
+** Copyright
+
+Copyright (c) 2020 Isaac Stead (isaac.stead@protonmail.com)
+
+** License
+
+Licensed under the AGPL License.
