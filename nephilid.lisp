@@ -23,40 +23,53 @@
    (listening :initform t
               :initarg :listening
               :accessor client-listening)
-   (event-queue :initform nil
-                :accessor client-event-queue))
+   (action-queue :initform nil
+                :accessor client-action-queue))
   (:documentation "The WebSocket client connection to the browser."))
 
-(defclass nephilid-event ()
+(defclass nephilid-action ()
   ((function :initarg :function
-             :reader event-function)
+             :reader action-function)
    (params :initarg :params
-           :reader event-params))
+           :reader action-params))
   (:documentation "Data structure for client/server communication.  To call a
 function on the server, a client sends a serialized representation of a
-nephilid-event. This contains the symbol of the function that should be called,
+nephilid-action. This contains the symbol of the function that should be called,
 and a list of parameters to pass to the function."))
 
-(defgeneric serialize-event (event)
+(defgeneric serialize-action (action)
   (:documentation "This will be JSON most likely, but could be XML or something else.")
-  (:method ((event nephilid-event))
-    (cl-json:encode-json-to-string event)))
+  (:method ((action nephilid-action))
+    (cl-json:encode-json-to-string action)))
 
-(defun deserialize-event-json (string)
-  "Convert a JSON string back into a nephilid-event"
+(defun deserialize-action-json (string)
+  "Convert a JSON string back into a nephilid-action"
   (let ((parsed (cl-json:decode-json-from-string string)))
-    (make-instance 'nephilid-event
+    (make-instance 'nephilid-action
                    :function (read-from-string (alexandria:assoc-value parsed :function))
                    :params (alexandria:assoc-value parsed :params))))
 
-(defgeneric call-event-function (event)
-  (:documentation "Call the function with parameters specified in the event.")
-  ;; This should make sure that only REGISTERED events are called, for security
-  (:method ((event nephilid-event))
-    (with-accessors ((f event-function) (p event-params)) event
+(defgeneric call-action-function (action)
+  (:documentation "Call the function with parameters specified in the action.")
+  ;; This should make sure that only REGISTERED functions are called, for security
+  (:method ((action nephilid-action))
+    (with-accessors ((f action-function) (p action-params)) action
       (if (registered-p f)
           (apply f p)
           (error "Client tried to call unregistered function ~a" f)))))
+
+(defclass nephilid-reaction ()
+  ((selector :initform nil
+             :initarg :selector
+             :accessor reaction-selector)
+   (content :initform nil
+            :initarg :content
+            :accessor reaction-content)))
+
+(defgeneric serialize-reaction (reaction))
+
+(defmethod serialize-reaction ((reaction nephilid-reaction))
+  (cl-json:encode-json-to-string reaction))
 
 (defun initialize-server (root-route)
   (let ((resource (make-instance 'nephilid-resource :route root-route)))
@@ -72,19 +85,36 @@ and a list of parameters to pass to the function."))
 (defmethod hunchensocket:text-message-received ((resource nephilid-resource) client message)
   "All messages sent from the client should be in the same format: "
   (let ((result (handler-case
-                    (call-event-function (deserialize-event-json message))
+                    (call-action-function (deserialize-action-json message))
                   (json:json-syntax-error () nil))))
     (when result
       (hunchensocket::send-message client result))))
 
 (define-parenscript send-message (message)
-  (ps:chain *nephilid-event-client* (send (ps:lisp message))))
+  (ps:chain *nephilid-action-client* (send (ps:lisp message))))
 
-(define-parenscript initialize-event-client (uri)
-  (ps:defvar *nephilid-event-client* (ps:new (-web-socket (ps:lisp uri))))
-  (ps:with-slots (onopen onerror onmessage) *nephilid-event-client*
-    (ps:setf onopen (ps:lambda () (ps:chain *nephilid-event-client* (send "Ping")))
+;;; Allow calls to remote lisp functions to be embedded in generated HTML
+;;; as JSON objects that will be sent to the server to be invoked
+
+(defun remote-call-reader (stream char)
+  (list (quote build-remote-call) (read stream t nil t)))
+
+(set-macro-character #\$ 'remote-call-reader)
+
+(defmacro build-remote-call (expr)
+  (let ((fn (write-to-string (car expr)))
+        (params (cons 'ps:array (cdr expr))))
+    `(ps:ps
+       (ps:chain *nephilid-action-client*
+                 (send (ps:chain |json|
+                                 (stringify (ps:create "function" (ps:lisp ,fn)
+                                                       "params"   (ps:lisp ',params)))))))))
+  
+(define-parenscript initialize-action-client (uri)
+  (ps:defvar *nephilid-action-client* (ps:new (-web-socket (ps:lisp uri))))
+  (ps:with-slots (onopen onerror onmessage) *nephilid-action-client*
+    (ps:setf onopen (ps:lambda () (ps:chain *nephilid-action-client* (send "Ping")))
              onerror (ps:lambda (error) (ps:chain console (log (+ "Websocket error: " error))))
              onmessage (ps:lambda (message) (ps:chain console (log (ps:@ message data)))))))
 
-;; (define-parenscript define-ws-handler (name event function 
+

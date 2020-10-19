@@ -5,13 +5,20 @@
 
 (nephilid::initialize-server "/nephilid")
 
+(defun change-text (selector)
+  (cl-json:encode-json-to-string `((selector . ,selector)
+                                   (content  . ,(format nil "crips")))))
+
 (defroute root ("/" :acceptor http) ()
   (with-html-string
     (:doctype)
     (:html
      (:head (:title "Nephilid demo")
-            (:script (nephilid::initialize-event-client "ws://localhost:1289/nephilid")))
+            (:script (nephilid::initialize-action-client "ws://localhost:1289/nephilid")))
      (:body
       (:p "hello nephilid")
-      (:span (:button :onclick (nephilid::send-message "hello") "Click me"))
-      (:span (:button "I should change colour :^)"))))))
+      (:span (:button :id "clickme"
+                      :onclick $(format t "sup G!!!")
+                      "Click me"))
+      (:span (:button :id "colour"`
+                      "I should change colour :^)"))))))
